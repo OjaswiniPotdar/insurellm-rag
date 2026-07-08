@@ -1,5 +1,3 @@
-
-
 import json
 import os
 
@@ -7,7 +5,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from openai import OpenAI
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from app.config.settings import get_settings
@@ -30,12 +28,11 @@ app.add_middleware(
 
 vec = VectorStore()
 settings = get_settings()
-openai_client = OpenAI(api_key=settings.openai.api_key)
+openai_client = AsyncOpenAI(api_key=settings.openai.api_key)
 
 
 class QueryRequest(BaseModel):
     question: str
-
 
 
 GREETINGS = {"hi", "hello", "hey", "good morning", "good evening", "good afternoon"}
@@ -44,6 +41,14 @@ GREETINGS = {"hi", "hello", "hey", "good morning", "good evening", "good afterno
 def is_greeting(text: str) -> bool:
     return text.lower().strip().rstrip("!.,") in GREETINGS
 
+
+# Headers required to prevent Render's (and most reverse proxies') edge layer
+# from buffering the streamed response before it reaches the client.
+STREAM_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
 
 
 @app.post("/query")
@@ -77,7 +82,6 @@ def query(request: QueryRequest):
     }
 
 
-
 @app.post("/query/stream")
 async def query_stream(request: QueryRequest):
 
@@ -87,7 +91,12 @@ async def query_stream(request: QueryRequest):
             for char in msg:
                 yield f"data: {json.dumps({'token': char})}\n\n"
             yield f"data: {json.dumps({'done': True, 'enough_context': True, 'thought_process': []})}\n\n"
-        return StreamingResponse(greeting_stream(), media_type="text/event-stream")
+
+        return StreamingResponse(
+            greeting_stream(),
+            media_type="text/event-stream",
+            headers=STREAM_HEADERS,
+        )
 
     results = vec.search(request.question, limit=5)
 
@@ -97,7 +106,12 @@ async def query_stream(request: QueryRequest):
             for char in msg:
                 yield f"data: {json.dumps({'token': char})}\n\n"
             yield f"data: {json.dumps({'done': True, 'enough_context': False, 'thought_process': []})}\n\n"
-        return StreamingResponse(empty_stream(), media_type="text/event-stream")
+
+        return StreamingResponse(
+            empty_stream(),
+            media_type="text/event-stream",
+            headers=STREAM_HEADERS,
+        )
 
     # Build context
     context_str = "\n\n".join(results["contents"].tolist())
@@ -118,14 +132,14 @@ If the context does not contain enough information, clearly state that.
     async def token_stream():
         full_answer = ""
         try:
-            stream = openai_client.chat.completions.create(
+            stream = await openai_client.chat.completions.create(
                 model=settings.openai.default_model,
                 messages=messages,
                 max_tokens=1000,
                 stream=True,
             )
 
-            for chunk in stream:
+            async for chunk in stream:
                 token = chunk.choices[0].delta.content or ""
                 if token:
                     full_answer += token
@@ -137,8 +151,11 @@ If the context does not contain enough information, clearly state that.
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
-    return StreamingResponse(token_stream(), media_type="text/event-stream")
-
+    return StreamingResponse(
+        token_stream(),
+        media_type="text/event-stream",
+        headers=STREAM_HEADERS,
+    )
 
 
 @app.get("/health")
