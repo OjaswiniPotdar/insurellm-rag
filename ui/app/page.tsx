@@ -142,7 +142,7 @@ export default function Home() {
       {/* Header */}
       <div className="w-full max-w-2xl mb-8 text-center">
         <h1 className="text-3xl font-bold text-white tracking-tight">
-          🛡️ Insurellm Assistant
+        Insurellm Assistant
         </h1>
         <p className="text-gray-500 text-sm mt-1">
           Ask anything about Insurellm
