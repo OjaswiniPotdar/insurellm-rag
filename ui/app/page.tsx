@@ -1,3 +1,6 @@
+
+
+
 "use client";
 
 import { useState, useRef, useEffect } from "react";
@@ -41,7 +44,7 @@ export default function Home() {
     ]);
 
     try {
-      const res = await fetch("http://localhost:8000/query/stream",  {
+      const res = await fetch("https://insurellm-rag.onrender.com/query/stream",  {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question }),
